@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using Emgu.CV;
 using Emgu.CV.Structure;
@@ -189,54 +190,91 @@ namespace PhotoSheetProcessor
             return (float)Math.Sqrt(dx * dx + dy * dy);
         }
 
-        private static Mat MakePortrait(Mat sheet)
+        private static List<Mat> MakePortrait(Mat sheet)
         {
+            var candidates = new List<Mat>();
             if (sheet.Width > sheet.Height)
             {
-                var rot = new Mat();
-                // можно Rotate90Clockwise, можно Rotate90CounterClockwise — выбери один
-                CvInvoke.Rotate(sheet, rot, RotateFlags.Rotate90CounterClockwise);
-                sheet.Dispose();
-                sheet = rot;
-            }
+                var clockwise = new Mat();
+                CvInvoke.Rotate(sheet, clockwise, RotateFlags.Rotate90Clockwise);
+                candidates.Add(clockwise);
 
-            return sheet;
+                var counterClockwise = new Mat();
+                CvInvoke.Rotate(sheet, counterClockwise, RotateFlags.Rotate90CounterClockwise);
+                candidates.Add(counterClockwise);
+
+                sheet.Dispose();
+            }
+            else
+            {
+                candidates.Add(sheet);
+            }
+            return candidates;
         }
 
         private static Mat EnsureUpright(Mat sheet)
         {
             // 1. Убедимся, что портретная ориентация
-            sheet = MakePortrait(sheet);
+            var candidates = MakePortrait(sheet);
 
-            // 2. В серый + бинаризация
-            var gray = new Mat();
-            CvInvoke.CvtColor(sheet, gray, ColorConversion.Bgr2Gray);
-            CvInvoke.Threshold(gray, gray, 0, 255, ThresholdType.BinaryInv | ThresholdType.Otsu);
-            // Теперь «чернила» = белые пиксели (т.к. инверсия), фон = чёрный
+            (double topInk, double bottomInk) MeasureInk(Mat candidate)
+            {
+                using var gray = new Mat();
+                CvInvoke.CvtColor(candidate, gray, ColorConversion.Bgr2Gray);
+                CvInvoke.Threshold(gray, gray, 0, 255, ThresholdType.BinaryInv | ThresholdType.Otsu);
 
-            int h = gray.Rows;
-            int w = gray.Cols;
-            int bandH = h / 5; // возьмём по 20% сверху и снизу
+                int h = gray.Rows;
+                int w = gray.Cols;
+                int bandH = Math.Max(1, h / 5);
 
-            var topRect = new Rectangle(0, 0, w, bandH);
-            var bottomRect = new Rectangle(0, h - bandH, w, bandH);
+                var topRect = new Rectangle(0, 0, w, bandH);
+                var bottomRect = new Rectangle(0, h - bandH, w, bandH);
 
-            using var top = new Mat(gray, topRect);
-            using var bottom = new Mat(gray, bottomRect);
+                using var top = new Mat(gray, topRect);
+                using var bottom = new Mat(gray, bottomRect);
 
-            double topInk = CvInvoke.CountNonZero(top);     // количество «чернил» наверху
-            double bottomInk = CvInvoke.CountNonZero(bottom); // и внизу
+                double topInk = CvInvoke.CountNonZero(top);
+                double bottomInk = CvInvoke.CountNonZero(bottom);
+
+                return (topInk, bottomInk);
+            }
+
+            Mat? selected = null;
+            double selectedTopInk = double.MinValue;
+
+            foreach (var candidate in candidates)
+            {
+                var (topInk, _) = MeasureInk(candidate);
+                if (selected == null || topInk > selectedTopInk)
+                {
+                    selected?.Dispose();
+                    selected = candidate;
+                    selectedTopInk = topInk;
+                }
+                else
+                {
+                    candidate.Dispose();
+                }
+            }
+
+            if (selected == null)
+            {
+                throw new InvalidOperationException("Не удалось получить портретную ориентацию.");
+            }
+
+            sheet = selected;
+
+            // 2. Измерим распределение «чернил» для выбранной ориентации
+            var (finalTopInk, finalBottomInk) = MeasureInk(sheet);
 
             // Хотим, чтобы наверху было больше чернил, чем внизу.
-            if (bottomInk > topInk)
+            if (finalBottomInk > finalTopInk)
             {
                 var rot180 = new Mat();
                 CvInvoke.Rotate(sheet, rot180, RotateFlags.Rotate180);
                 sheet.Dispose();
                 sheet = rot180;
             }
-
-            gray.Dispose();
             return sheet;
         }
 
