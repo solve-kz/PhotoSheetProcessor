@@ -76,48 +76,28 @@ namespace PhotoSheetProcessor
             int h = binary.Rows;
             int w = binary.Cols;
 
-            var data = (byte[,,])binary.GetData();
+            var data = (byte[,])binary.GetData();
             int[] rowSums = new int[h];
             int[] colSums = new int[w];
 
+            // 1) Считаем кол-во белых пикселей по столбцам (для left/right)
             for (int y = 0; y < h; y++)
             {
                 for (int x = 0; x < w; x++)
                 {
-                    if (data[y, x, 0] == 255)
+                    if (data[y, x] == 255)
                     {
-                        rowSums[y]++;
                         colSums[x]++;
                     }
                 }
             }
 
-            int maxRow = rowSums.Max();
-            int maxCol = colSums.Max();
+            // --- сначала находим left/right как раньше ---
 
-            // Пороги – подбираются, у меня на твоём примере хорошо работают 0.90 и 0.80
-            double rowFrac = 0.90;
+            int maxCol = colSums.Max();
             double colFrac = 0.80;
 
-            int top = 0, bottom = h - 1, left = 0, right = w - 1;
-
-            for (int y = 0; y < h; y++)
-            {
-                if (rowSums[y] >= rowFrac * maxRow)
-                {
-                    top = y;
-                    break;
-                }
-            }
-
-            for (int y = h - 1; y >= 0; y--)
-            {
-                if (rowSums[y] >= rowFrac * maxRow)
-                {
-                    bottom = y;
-                    break;
-                }
-            }
+            int left = 0, right = w - 1;
 
             for (int x = 0; x < w; x++)
             {
@@ -137,28 +117,76 @@ namespace PhotoSheetProcessor
                 }
             }
 
-            // Чуть подрежем снизу, чтобы отрезать вторую таблицу
+            // 2) А теперь считаем rowSums ТОЛЬКО в диапазоне [left; right]
+            //    – игнорируем левую/правую "лишнюю" бумагу
+            for (int y = 0; y < h; y++)
+            {
+                int sum = 0;
+                for (int x = left; x <= right; x++)
+                {
+                    if (data[y, x] == 255)
+                        sum++;
+                }
+                rowSums[y] = sum;
+            }
+
+            int maxRow = rowSums.Max();
+            double rowFrac = 0.90;
+
+            int top = 0, bottom = h - 1;
+
+            // верх
+            for (int y = 0; y < h; y++)
+            {
+                if (rowSums[y] >= rowFrac * maxRow)
+                {
+                    top = y;
+                    break;
+                }
+            }
+
+            // низ
+            for (int y = h - 1; y >= 0; y--)
+            {
+                if (rowSums[y] >= rowFrac * maxRow)
+                {
+                    bottom = y;
+                    break;
+                }
+            }
+
+            // Дополнительный отступ сверху/снизу:
+            int topMargin = 40;    // теперь он точно будет заметен
+            if (top + topMargin < bottom)
+                top += topMargin;
+
             int bottomMargin = 40;
             if (bottom - bottomMargin > top)
                 bottom -= bottomMargin;
 
+            // Финальный прямоугольник
             int width = Math.Max(1, right - left + 1);
             int height = Math.Max(1, bottom - top + 1);
 
             return new Rectangle(left, top, width, height);
         }
 
-        /// <summary>
-        /// Гарантирует, что лист «стоит» и не вверх ногами.
-        /// Предполагаем, что ориентация уже портретная.
-        /// </summary>
         private static Mat EnsureUpright(Mat sheet)
         {
+            // 1) Лист уже портретный, но на всякий случай можно ещё раз проверить
+            if (sheet.Width > sheet.Height)
+            {
+                var rot = new Mat();
+                CvInvoke.Rotate(sheet, rot, RotateFlags.Rotate90CounterClockwise);
+                sheet.Dispose();
+                sheet = rot;
+            }
+
             var gray = new Mat();
             CvInvoke.CvtColor(sheet, gray, ColorConversion.Bgr2Gray);
 
             var binary = new Mat();
-            // Инверсия: «чернила» -> белый, остальное -> чёрный
+            // Инверсия: «чернила» -> белый, фон -> чёрный
             CvInvoke.Threshold(gray, binary, 0, 255,
                 ThresholdType.BinaryInv | ThresholdType.Otsu);
 
@@ -178,7 +206,7 @@ namespace PhotoSheetProcessor
             gray.Dispose();
             binary.Dispose();
 
-            // В правильной ориентации сверху больше текста/цифр
+            // В правильной ориентации вверху больше текста/цифр
             if (bottomInk > topInk)
             {
                 var rot180 = new Mat();
@@ -189,5 +217,6 @@ namespace PhotoSheetProcessor
 
             return sheet;
         }
+
     }
 }
