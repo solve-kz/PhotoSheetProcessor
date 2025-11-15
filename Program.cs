@@ -243,14 +243,33 @@ namespace PhotoSheetProcessor
 
         private static int DetectContentTop(Mat sheet)
         {
+            int inkTop = DetectTopByInk(sheet);
+            if (inkTop > 0)
+                return inkTop;
+
+            int edgeTop = DetectTopByEdge(sheet);
+            if (edgeTop > 0)
+            {
+                int marginBelowEdge = 18;
+                return Math.Max(0, edgeTop + marginBelowEdge);
+            }
+
+            return 0;
+        }
+
+        private static int DetectTopByInk(Mat sheet)
+        {
             using var gray = new Mat();
             CvInvoke.CvtColor(sheet, gray, ColorConversion.Bgr2Gray);
 
             using var blurred = new Mat();
-            CvInvoke.GaussianBlur(gray, blurred, new Size(5, 5), 0);
+            CvInvoke.GaussianBlur(gray, blurred, new Size(3, 3), 0);
 
             using var binary = new Mat();
             CvInvoke.Threshold(blurred, binary, 0, 255, ThresholdType.BinaryInv | ThresholdType.Otsu);
+
+            using var kernel = CvInvoke.GetStructuringElement(ElementShape.Rectangle, new Size(3, 3), new Point(-1, -1));
+            CvInvoke.MorphologyEx(binary, binary, MorphOp.Dilate, kernel, new Point(-1, -1), 1, BorderType.Default, default(MCvScalar));
 
             int h = binary.Rows;
             int w = binary.Cols;
@@ -270,9 +289,7 @@ namespace PhotoSheetProcessor
             using var roi = new Mat(binary, roiRect);
             var data = (byte[,])roi.GetData();
 
-            int minInkPerRow = Math.Max(1, (int)(roiWidth * 0.01));
-            int safetyMargin = 6;
-
+            int[] rowInk = new int[roi.Rows];
             for (int y = 0; y < roi.Rows; y++)
             {
                 int inkCount = 0;
@@ -281,9 +298,96 @@ namespace PhotoSheetProcessor
                     if (data[y, x] > 0)
                         inkCount++;
                 }
+                rowInk[y] = inkCount;
+            }
 
-                if (inkCount >= minInkPerRow)
+            int minInkPerRow = Math.Max(2, (int)(roiWidth * 0.002));
+            int lookAhead = 4;
+            int safetyMargin = 6;
+
+            for (int y = 0; y < rowInk.Length; y++)
+            {
+                if (rowInk[y] < minInkPerRow)
+                    continue;
+
+                bool stable = true;
+                for (int k = 1; k <= lookAhead && y + k < rowInk.Length; k++)
+                {
+                    if (rowInk[y + k] < minInkPerRow / 2)
+                    {
+                        stable = false;
+                        break;
+                    }
+                }
+
+                if (stable)
                     return Math.Max(0, y - safetyMargin);
+            }
+
+            return 0;
+        }
+
+        private static int DetectTopByEdge(Mat sheet)
+        {
+            using var gray = new Mat();
+            CvInvoke.CvtColor(sheet, gray, ColorConversion.Bgr2Gray);
+
+            using var blurred = new Mat();
+            CvInvoke.GaussianBlur(gray, blurred, new Size(5, 5), 0);
+
+            using var edges = new Mat();
+            CvInvoke.Canny(blurred, edges, 40, 120);
+
+            int h = edges.Rows;
+            int w = edges.Cols;
+
+            int marginX = w / 6;
+            int roiLeft = Math.Max(0, marginX);
+            int roiRight = Math.Min(w, w - marginX);
+            if (roiRight <= roiLeft)
+            {
+                roiLeft = 0;
+                roiRight = w;
+            }
+
+            int roiWidth = roiRight - roiLeft;
+            var roiRect = new Rectangle(roiLeft, 0, roiWidth, h);
+
+            using var roi = new Mat(edges, roiRect);
+            var data = (byte[,])roi.GetData();
+
+            int[] rowEdges = new int[roi.Rows];
+            for (int y = 0; y < roi.Rows; y++)
+            {
+                int edgeCount = 0;
+                for (int x = 0; x < roiWidth; x++)
+                {
+                    if (data[y, x] > 0)
+                        edgeCount++;
+                }
+                rowEdges[y] = edgeCount;
+            }
+
+            int minEdgesPerRow = Math.Max(3, (int)(roiWidth * 0.003));
+            int runLength = 3;
+
+            for (int y = 0; y < rowEdges.Length; y++)
+            {
+                if (rowEdges[y] < minEdgesPerRow)
+                    continue;
+
+                bool run = true;
+                for (int k = 1; k < runLength && y + k < rowEdges.Length; k++)
+                {
+                    if (rowEdges[y + k] < minEdgesPerRow / 2)
+                    {
+                        run = false;
+                        break;
+                    }
+                }
+
+                if (run)
+                    return y;
             }
 
             return 0;
