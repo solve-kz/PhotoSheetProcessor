@@ -225,7 +225,7 @@ namespace PhotoSheetProcessor
 
         private static Mat ApplyFinalMargins(Mat sheet)
         {
-            int extraTop = 140;    // более заметная подрезка сверху после выравнивания
+            int extraTop = 180;    // более заметная подрезка сверху после выравнивания
             int extraRight = 30;   // лёгкая подрезка справа
 
             int left = 0;
