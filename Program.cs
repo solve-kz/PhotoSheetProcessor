@@ -52,6 +52,7 @@ namespace PhotoSheetProcessor
 
             // 3) Разворачиваем так, чтобы «верх» был наверху
             sheet = EnsureUpright(sheet);
+            sheet = ApplyFinalMargins(sheet);
 
             CvInvoke.Imwrite(outputPath, sheet);
             sheet.Dispose();
@@ -156,7 +157,7 @@ namespace PhotoSheetProcessor
             }
 
             // Дополнительный отступ сверху/снизу:
-            int topMargin = 120;   // сильнее обрезаем верх, чтобы убрать лишние поля
+            int topMargin = 40;    // базовая подрезка верха, остальное делаем после выравнивания
             if (top + topMargin < bottom)
                 top += topMargin;
 
@@ -220,6 +221,24 @@ namespace PhotoSheetProcessor
             }
 
             return sheet;
+        }
+
+        private static Mat ApplyFinalMargins(Mat sheet)
+        {
+            int extraTop = 140;    // более заметная подрезка сверху после выравнивания
+            int extraRight = 30;   // лёгкая подрезка справа
+
+            int left = 0;
+            int top = Math.Min(extraTop, sheet.Height - 1);
+
+            int width = Math.Max(1, sheet.Width - extraRight - left);
+            int height = Math.Max(1, sheet.Height - top);
+
+            var rect = new Rectangle(left, top, width, height);
+            var cropped = new Mat(sheet, rect).Clone();
+
+            sheet.Dispose();
+            return cropped;
         }
 
     }
