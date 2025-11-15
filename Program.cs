@@ -225,11 +225,11 @@ namespace PhotoSheetProcessor
 
         private static Mat ApplyFinalMargins(Mat sheet)
         {
-            int extraTop = 180;    // более заметная подрезка сверху после выравнивания
+            int extraTop = DetectContentTop(sheet);
             int extraRight = 30;   // лёгкая подрезка справа
 
             int left = 0;
-            int top = Math.Min(extraTop, sheet.Height - 1);
+            int top = Math.Min(extraTop, Math.Max(0, sheet.Height - 1));
 
             int width = Math.Max(1, sheet.Width - extraRight - left);
             int height = Math.Max(1, sheet.Height - top);
@@ -239,6 +239,54 @@ namespace PhotoSheetProcessor
 
             sheet.Dispose();
             return cropped;
+        }
+
+        private static int DetectContentTop(Mat sheet)
+        {
+            using var gray = new Mat();
+            CvInvoke.CvtColor(sheet, gray, ColorConversion.Bgr2Gray);
+
+            using var blurred = new Mat();
+            CvInvoke.GaussianBlur(gray, blurred, new Size(5, 5), 0);
+
+            using var binary = new Mat();
+            CvInvoke.Threshold(blurred, binary, 0, 255, ThresholdType.BinaryInv | ThresholdType.Otsu);
+
+            int h = binary.Rows;
+            int w = binary.Cols;
+
+            int marginX = w / 8;
+            int roiLeft = Math.Max(0, marginX);
+            int roiRight = Math.Min(w, w - marginX);
+            if (roiRight <= roiLeft)
+            {
+                roiLeft = 0;
+                roiRight = w;
+            }
+
+            int roiWidth = roiRight - roiLeft;
+            var roiRect = new Rectangle(roiLeft, 0, roiWidth, h);
+
+            using var roi = new Mat(binary, roiRect);
+            var data = (byte[,])roi.GetData();
+
+            int minInkPerRow = Math.Max(1, (int)(roiWidth * 0.01));
+            int safetyMargin = 6;
+
+            for (int y = 0; y < roi.Rows; y++)
+            {
+                int inkCount = 0;
+                for (int x = 0; x < roiWidth; x++)
+                {
+                    if (data[y, x] > 0)
+                        inkCount++;
+                }
+
+                if (inkCount >= minInkPerRow)
+                    return Math.Max(0, y - safetyMargin);
+            }
+
+            return 0;
         }
 
     }
