@@ -165,6 +165,10 @@ namespace PhotoSheetProcessor
             if (bottom - bottomMargin > top)
                 bottom -= bottomMargin;
 
+            int rightMargin = 20;  // лёгкая подрезка справа
+            if (right - rightMargin > left)
+                right -= rightMargin;
+
             // Финальный прямоугольник
             int width = Math.Max(1, right - left + 1);
             int height = Math.Max(1, bottom - top + 1);
