@@ -300,26 +300,28 @@ namespace PhotoSheetProcessor
             var roiRect = new Rectangle(0, 0, binary.Cols, roiHeight);
             using var roi = new Mat(binary, roiRect);
 
-            using var lineSegments = new VectorOfVec4i();
-
-            CvInvoke.HoughLinesP(roi, lineSegments, 1, Math.PI / 180, 80,
-                Math.Max(1, (int)(roi.Width * 0.7)), 10);
+            LineSegment2D[] lineSegments = CvInvoke.HoughLinesP(
+                roi,
+                1,
+                Math.PI / 180,
+                80,
+                Math.Max(1, (int)(roiRect.Width * 0.7)),
+                10);
 
             int bestTop = int.MaxValue;
-            for (int i = 0; i < lineSegments.Size; i++)
+            foreach (var segment in lineSegments)
             {
-                var segment = lineSegments[i];
-                int x1 = segment.Item0;
-                int y1 = segment.Item1;
-                int x2 = segment.Item2;
-                int y2 = segment.Item3;
+                int x1 = segment.P1.X;
+                int y1 = segment.P1.Y;
+                int x2 = segment.P2.X;
+                int y2 = segment.P2.Y;
 
                 double angle = Math.Abs(Math.Atan2(y2 - y1, x2 - x1) * 180.0 / Math.PI);
                 if (angle > 5)
                     continue;
 
-                double length = Math.Sqrt(Math.Pow(x2 - x1, 2) + Math.Pow(y2 - y1, 2));
-                if (length < roi.Width * 0.7)
+                double length = segment.Length;
+                if (length < roiRect.Width * 0.7)
                     continue;
 
                 int segmentTop = Math.Min(y1, y2);
