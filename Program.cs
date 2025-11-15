@@ -5,6 +5,7 @@ using System.Drawing;
 using Emgu.CV;
 using Emgu.CV.CvEnum;
 using Emgu.CV.Structure;
+using Emgu.CV.Util;
 
 namespace PhotoSheetProcessor
 {
@@ -65,6 +66,8 @@ namespace PhotoSheetProcessor
         /// Находит примерные границы листа по яркости (белая бумага),
         /// обрезает снизу вторую таблицу.
         /// </summary>
+        private static int _fallbackTopReserve = 0;
+
         private static Rectangle FindPageByBrightness(Mat src)
         {
             using var gray = new Mat();
@@ -156,10 +159,11 @@ namespace PhotoSheetProcessor
                 }
             }
 
-            // Дополнительный отступ сверху/снизу:
-            int topMargin = 40;    // базовая подрезка верха, остальное делаем после выравнивания
-            if (top + topMargin < bottom)
-                top += topMargin;
+            if (bottom <= top)
+            {
+                top = 0;
+                bottom = h - 1;
+            }
 
             int bottomMargin = 40;
             if (bottom - bottomMargin > top)
@@ -172,6 +176,16 @@ namespace PhotoSheetProcessor
             // Финальный прямоугольник
             int width = Math.Max(1, right - left + 1);
             int height = Math.Max(1, bottom - top + 1);
+
+            if (bottom > top && top > 0)
+            {
+                int reserve = (bottom - top) / 200;
+                _fallbackTopReserve = Math.Min(3, Math.Max(2, reserve));
+            }
+            else
+            {
+                _fallbackTopReserve = 0;
+            }
 
             return new Rectangle(left, top, width, height);
         }
@@ -225,11 +239,19 @@ namespace PhotoSheetProcessor
 
         private static Mat ApplyFinalMargins(Mat sheet)
         {
-            int extraTop = DetectContentTop(sheet);
+            int detectedTop = DetectContentTop(sheet);
             int extraRight = 30;   // лёгкая подрезка справа
 
             int left = 0;
-            int top = Math.Min(extraTop, Math.Max(0, sheet.Height - 1));
+            int top;
+            if (detectedTop >= 0)
+            {
+                top = Math.Min(detectedTop, Math.Max(0, sheet.Height - 1));
+            }
+            else
+            {
+                top = Math.Min(_fallbackTopReserve, Math.Max(0, sheet.Height - 1));
+            }
 
             int width = Math.Max(1, sheet.Width - extraRight - left);
             int height = Math.Max(1, sheet.Height - top);
@@ -243,6 +265,10 @@ namespace PhotoSheetProcessor
 
         private static int DetectContentTop(Mat sheet)
         {
+            int lineTop = DetectTopByHorizontalLine(sheet);
+            if (lineTop >= 0)
+                return lineTop;
+
             int inkTop = DetectTopByInk(sheet);
             if (inkTop > 0)
                 return inkTop;
@@ -254,7 +280,59 @@ namespace PhotoSheetProcessor
                 return Math.Max(0, edgeTop + marginBelowEdge);
             }
 
-            return 0;
+            return -1;
+        }
+
+        private static int DetectTopByHorizontalLine(Mat sheet)
+        {
+            using var gray = new Mat();
+            CvInvoke.CvtColor(sheet, gray, ColorConversion.Bgr2Gray);
+
+            using var binary = new Mat();
+            CvInvoke.Threshold(gray, binary, 0, 255, ThresholdType.BinaryInv | ThresholdType.Otsu);
+
+            int kernelWidth = Math.Max(10, sheet.Width / 4);
+            int kernelHeight = Math.Min(5, Math.Max(3, sheet.Height / 200));
+            using var kernel = CvInvoke.GetStructuringElement(ElementShape.Rectangle, new Size(kernelWidth, kernelHeight), new Point(-1, -1));
+            CvInvoke.MorphologyEx(binary, binary, MorphOp.Close, kernel, new Point(-1, -1), 1, BorderType.Default, default(MCvScalar));
+
+            int roiHeight = Math.Max(1, sheet.Height / 3);
+            var roiRect = new Rectangle(0, 0, binary.Cols, roiHeight);
+            using var roi = new Mat(binary, roiRect);
+
+            using var lineSegments = new VectorOfVec4i();
+
+            CvInvoke.HoughLinesP(roi, lineSegments, 1, Math.PI / 180, 80,
+                Math.Max(1, (int)(roi.Width * 0.7)), 10);
+
+            int bestTop = int.MaxValue;
+            for (int i = 0; i < lineSegments.Size; i++)
+            {
+                var segment = lineSegments[i];
+                int x1 = segment.Item0;
+                int y1 = segment.Item1;
+                int x2 = segment.Item2;
+                int y2 = segment.Item3;
+
+                double angle = Math.Abs(Math.Atan2(y2 - y1, x2 - x1) * 180.0 / Math.PI);
+                if (angle > 5)
+                    continue;
+
+                double length = Math.Sqrt(Math.Pow(x2 - x1, 2) + Math.Pow(y2 - y1, 2));
+                if (length < roi.Width * 0.7)
+                    continue;
+
+                int segmentTop = Math.Min(y1, y2);
+                if (segmentTop < bestTop)
+                    bestTop = segmentTop;
+            }
+
+            if (bestTop == int.MaxValue)
+                return -1;
+
+            int reserve = 2;
+            int absoluteTop = Math.Max(0, bestTop + roiRect.Top - reserve);
+            return absoluteTop;
         }
 
         private static int DetectTopByInk(Mat sheet)
