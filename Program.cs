@@ -156,13 +156,17 @@ namespace PhotoSheetProcessor
             }
 
             // Дополнительный отступ сверху/снизу:
-            int topMargin = 40;    // теперь он точно будет заметен
+            int topMargin = 120;   // сильнее обрезаем верх, чтобы убрать лишние поля
             if (top + topMargin < bottom)
                 top += topMargin;
 
             int bottomMargin = 40;
             if (bottom - bottomMargin > top)
                 bottom -= bottomMargin;
+
+            int rightMargin = 20;  // лёгкая подрезка справа
+            if (right - rightMargin > left)
+                right -= rightMargin;
 
             // Финальный прямоугольник
             int width = Math.Max(1, right - left + 1);
