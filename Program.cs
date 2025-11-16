@@ -288,17 +288,19 @@ namespace PhotoSheetProcessor
             using var gray = new Mat();
             CvInvoke.CvtColor(sheet, gray, ColorConversion.Bgr2Gray);
 
-            using var binary = new Mat();
-            CvInvoke.Threshold(gray, binary, 0, 255, ThresholdType.BinaryInv | ThresholdType.Otsu);
+            using var inkMask = new Mat();
+            CvInvoke.Threshold(gray, inkMask, 0, 255, ThresholdType.BinaryInv | ThresholdType.Otsu);
+
+            using var lineMask = inkMask.Clone();
 
             int kernelWidth = Math.Max(10, sheet.Width / 4);
             int kernelHeight = Math.Min(5, Math.Max(3, sheet.Height / 200));
             using var kernel = CvInvoke.GetStructuringElement(ElementShape.Rectangle, new Size(kernelWidth, kernelHeight), new Point(-1, -1));
-            CvInvoke.MorphologyEx(binary, binary, MorphOp.Close, kernel, new Point(-1, -1), 1, BorderType.Default, default(MCvScalar));
+            CvInvoke.MorphologyEx(lineMask, lineMask, MorphOp.Close, kernel, new Point(-1, -1), 1, BorderType.Default, default(MCvScalar));
 
             int roiHeight = Math.Max(1, sheet.Height / 3);
-            var roiRect = new Rectangle(0, 0, binary.Cols, roiHeight);
-            using var roi = new Mat(binary, roiRect);
+            var roiRect = new Rectangle(0, 0, lineMask.Cols, roiHeight);
+            using var roi = new Mat(lineMask, roiRect);
 
             LineSegment2D[] lineSegments = CvInvoke.HoughLinesP(
                 roi,
@@ -332,8 +334,45 @@ namespace PhotoSheetProcessor
             if (bestTop == int.MaxValue)
                 return -1;
 
-            int reserve = 2;
-            int absoluteTop = Math.Max(0, bestTop + roiRect.Top - reserve);
+            int absoluteLineTop = bestTop + roiRect.Top;
+
+            int searchTop = Math.Max(0, absoluteLineTop - sheet.Height / 4);
+            int searchHeight = Math.Max(1, absoluteLineTop - searchTop);
+            int marginX = sheet.Width / 10;
+            int textLeft = Math.Max(0, marginX);
+            int textWidth = Math.Max(1, sheet.Width - textLeft * 2);
+            if (textLeft + textWidth > sheet.Width)
+                textWidth = sheet.Width - textLeft;
+
+            var textRoiRect = new Rectangle(textLeft, searchTop, textWidth, searchHeight);
+            if (textRoiRect.Bottom > inkMask.Rows)
+                textRoiRect.Height = Math.Max(1, inkMask.Rows - textRoiRect.Top);
+
+            int firstInkRow = -1;
+            using (var textRoi = new Mat(inkMask, textRoiRect))
+            {
+                var data = (byte[,])textRoi.GetData();
+                int minInkPerRow = Math.Max(3, textRoi.Cols / 60);
+                for (int y = 0; y < textRoi.Rows; y++)
+                {
+                    int inkCount = 0;
+                    for (int x = 0; x < textRoi.Cols; x++)
+                    {
+                        if (data[y, x] > 0)
+                            inkCount++;
+                    }
+
+                    if (inkCount >= minInkPerRow)
+                    {
+                        firstInkRow = y;
+                        break;
+                    }
+                }
+            }
+
+            int topCandidate = firstInkRow >= 0 ? textRoiRect.Top + firstInkRow : absoluteLineTop;
+            int reserve = 3;
+            int absoluteTop = Math.Max(0, topCandidate - reserve);
             return absoluteTop;
         }
 
