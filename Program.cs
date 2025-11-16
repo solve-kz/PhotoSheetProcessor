@@ -13,23 +13,64 @@ namespace PhotoSheetProcessor
     {
         static void Main(string[] args)
         {
-            string inputPath = @"D:\Temp\input.jpg";
-            string outputPath = @"D:\Temp\output_sheet.jpg";
+            string dataDirectory = @"D:\Data";
 
+            if (!Directory.Exists(dataDirectory))
+            {
+                Console.WriteLine("Папка не найдена: " + dataDirectory);
+                Console.ReadKey();
+                return;
+            }
+
+            var jpgFiles = Directory
+                .EnumerateFiles(dataDirectory, "*.jpg", SearchOption.TopDirectoryOnly)
+                .ToList();
+
+            if (jpgFiles.Count == 0)
+            {
+                Console.WriteLine("В папке " + dataDirectory + " нет файлов .jpg.");
+                Console.ReadKey();
+                return;
+            }
+
+            int processed = 0;
+            foreach (var inputPath in jpgFiles)
+            {
+                string fileName = Path.GetFileNameWithoutExtension(inputPath) ?? "output";
+                string outputPath = Path.Combine(dataDirectory, fileName + "_new.jpg");
+
+                try
+                {
+                    if (ProcessFile(inputPath, outputPath))
+                    {
+                        processed++;
+                        Console.WriteLine("Готово. Сохранено как " + outputPath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Ошибка при обработке файла " + inputPath + ": " + ex.Message);
+                }
+            }
+
+            Console.WriteLine("Всего обработано файлов: " + processed);
+            Console.ReadKey();
+        }
+
+        private static bool ProcessFile(string inputPath, string outputPath)
+        {
             if (!File.Exists(inputPath))
             {
                 Console.WriteLine("Файл не найден: " + inputPath);
-                Console.ReadKey();
-                return;
+                return false;
             }
 
             using var original = CvInvoke.Imread(inputPath);
 
             if (original.IsEmpty)
             {
-                Console.WriteLine("Не удалось прочитать изображение.");
-                Console.ReadKey();
-                return;
+                Console.WriteLine("Не удалось прочитать изображение: " + inputPath);
+                return false;
             }
 
             // 1) Находим границы листа по яркости
@@ -57,9 +98,7 @@ namespace PhotoSheetProcessor
 
             CvInvoke.Imwrite(outputPath, sheet);
             sheet.Dispose();
-
-            Console.WriteLine("Готово. Сохранено как " + outputPath);
-            Console.ReadKey();
+            return true;
         }
 
         /// <summary>
