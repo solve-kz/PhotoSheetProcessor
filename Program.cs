@@ -295,7 +295,7 @@ namespace PhotoSheetProcessor
 
             int kernelWidth = Math.Max(10, sheet.Width / 4);
             int kernelHeight = Math.Min(5, Math.Max(3, sheet.Height / 200));
-            using var kernel = CvInvoke.GetStructuringElement(ElementShape.Rectangle, new Size(kernelWidth, kernelHeight), new Point(-1, -1));
+            using var kernel = CvInvoke.GetStructuringElement(MorphShapes.Rectangle, new Size(kernelWidth, kernelHeight), new Point(-1, -1));
             CvInvoke.MorphologyEx(lineMask, lineMask, MorphOp.Close, kernel, new Point(-1, -1), 1, BorderType.Default, default(MCvScalar));
 
             int roiHeight = Math.Max(1, sheet.Height / 3);
@@ -387,7 +387,7 @@ namespace PhotoSheetProcessor
             using var binary = new Mat();
             CvInvoke.Threshold(blurred, binary, 0, 255, ThresholdType.BinaryInv | ThresholdType.Otsu);
 
-            using var kernel = CvInvoke.GetStructuringElement(ElementShape.Rectangle, new Size(3, 3), new Point(-1, -1));
+            using var kernel = CvInvoke.GetStructuringElement(MorphShapes.Rectangle, new Size(3, 3), new Point(-1, -1));
             CvInvoke.MorphologyEx(binary, binary, MorphOp.Dilate, kernel, new Point(-1, -1), 1, BorderType.Default, default(MCvScalar));
 
             int h = binary.Rows;
